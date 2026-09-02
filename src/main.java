@@ -1,6 +1,3 @@
-import jdk.swing.interop.SwingInterOpUtils;
-
-import java.sql.SQLOutput;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +44,8 @@ class Driver {
     public String getName() { return name; }
     public DriverStatus getStatus() { return status; }
     public void setStatus(DriverStatus status) { this.status = status; }
+
+    public String getLicenseNumber() { return licenseNumber; }
 }
 
 class Route {
@@ -103,6 +102,10 @@ class FleetSystem {
             System.out.println("Error: Vehicle ID already exists.");
             return false;
         }
+        if (vehicles.stream().anyMatch(v -> v.getPlateNumber().equalsIgnoreCase(plate))) {
+            System.out.println("Error: Plate Number already exists.");
+            return false;
+        }
         vehicles.add(new Vehicle(id, plate, capacity, VehicleStatus.IDLE));
         return true;
     }
@@ -110,6 +113,10 @@ class FleetSystem {
     public boolean addDriver(String id, String name, String license) {
         if (drivers.stream().anyMatch(d -> d.getId().equalsIgnoreCase(id))) {
             System.out.println("Error: Driver ID already exists.");
+            return false;
+        }
+        if (drivers.stream().anyMatch(d -> d.getLicenseNumber().equalsIgnoreCase(license))) {
+            System.out.println("Error: License Number already exists.");
             return false;
         }
         drivers.add(new Driver(id, name, license, DriverStatus.AVAILABLE));
@@ -191,7 +198,6 @@ class FleetSystem {
         return true;
     }
 
-
     public void printFleetStatus() {
         System.out.println("\n--- VEHICLE FLEET ---");
         System.out.printf("%-10s %-12s %-10s %-15s\n", "ID", "Plate", "Capacity", "Status");
@@ -221,67 +227,121 @@ class FleetSystem {
         }
     }
 
-    public boolean delete(String tripId){
-        Trip trip = trips.stream()
+    // --- DELETE METHODS ---
 
-                .filter(t -> t.getId().equalsIgnoreCase(tripId))
-                .findFirst()
-                .orElse(null);
+    public boolean deleteVehicle(String id) {
+        Vehicle vehicle = vehicles.stream().filter(v -> v.getId().equalsIgnoreCase(id)).findFirst().orElse(null);
+        if (vehicle == null) {
+            System.out.println("Error: Vehicle ID not found.");
+            return false;
+        }
+        if (vehicle.getStatus() == VehicleStatus.IN_TRANSIT) {
+            System.out.println("Error: Cannot delete a vehicle that is currently IN_TRANSIT.");
+            return false;
+        }
+        vehicles.remove(vehicle);
+        return true;
+    }
 
-        if (trip == null){
+    public boolean deleteDriver(String id) {
+        Driver driver = drivers.stream().filter(d -> d.getId().equalsIgnoreCase(id)).findFirst().orElse(null);
+        if (driver == null) {
+            System.out.println("Error: Driver ID not found.");
+            return false;
+        }
+        if (driver.getStatus() == DriverStatus.ON_DUTY) {
+            System.out.println("Error: Cannot delete a driver who is ON_DUTY.");
+            return false;
+        }
+        drivers.remove(driver);
+        return true;
+    }
+
+    public boolean deleteRoute(String id) {
+        Route route = routes.stream().filter(r -> r.getId().equalsIgnoreCase(id)).findFirst().orElse(null);
+        if (route == null) {
+            System.out.println("Error: Route ID not found.");
+            return false;
+        }
+        boolean activeTripUsesRoute = trips.stream().anyMatch(t -> t.getRouteId().equalsIgnoreCase(id)
+                && (t.getStatus() == TripStatus.SCHEDULED || t.getStatus() == TripStatus.IN_PROGRESS));
+        if (activeTripUsesRoute) {
+            System.out.println("Error: Cannot delete a route associated with active or scheduled trips.");
+            return false;
+        }
+        routes.remove(route);
+        return true;
+    }
+
+    public boolean deleteTrip(String tripId) {
+        Trip trip = trips.stream().filter(t -> t.getId().equalsIgnoreCase(tripId)).findFirst().orElse(null);
+        if (trip == null) {
+            System.out.println("Error: Trip ID does not exist.");
+            return false;
+        }
+        if (trip.getStatus() == TripStatus.IN_PROGRESS) {
+            System.out.println("Error: Cannot delete a trip that is currently in progress.");
+            return false;
+        }
+        trips.remove(trip);
+        return true;
+    }
+
+    public boolean deleteCompletedTrip(String tripId) {
+        Trip trip = trips.stream().filter(t -> t.getId().equalsIgnoreCase(tripId)).findFirst().orElse(null);
+        if (trip == null) {
+            System.out.println("Error: Trip ID does not exist.");
+            return false;
+        }
+        if (trip.getStatus() != TripStatus.COMPLETED) {
+            System.out.println("Error: Selected trip is not marked as COMPLETED.");
+            return false;
+        }
+        trips.remove(trip);
+        return true;
+    }
+
+    public boolean cancel(String tripId) {
+        Trip trip = trips.stream().filter(t -> t.getId().equalsIgnoreCase(tripId)).findFirst().orElse(null);
+        if (trip == null) {
             System.out.println("Error: Trip ID does not exist on the list.");
             return false;
         }
-        if (trip.getStatus() == TripStatus.IN_PROGRESS){
-            System.out.println("Error: Cannot Delete a trip that is currently in pogress.");
-            return false;
-        }
-        trips.remove(trip);
-        return true;
-    }
-
-    public boolean cancel(String tripId){
-        Trip trip = trips.stream()
-
-                .filter(t -> t.getId().equalsIgnoreCase(tripId))
-                .findFirst()
-                .orElse(null);
-
-        if(trip == null){
-            System.out.println("Error: Trip id does not exist on the list.");
-            return false;
-        }
-        if(trip.getStatus() == TripStatus.IN_PROGRESS){
+        if (trip.getStatus() == TripStatus.IN_PROGRESS) {
             System.out.println("Error: Cannot cancel trip that is currently in progress.");
             return false;
         }
-        if(trip.getStatus() == TripStatus.COMPLETED){
+        if (trip.getStatus() == TripStatus.COMPLETED) {
             System.out.println("Error: Cannot cancel trip that is already completed.");
             return false;
         }
-        if (trip.getStatus() == TripStatus.CANCELLED){
+        if (trip.getStatus() == TripStatus.CANCELLED) {
             System.out.println("Error: Trip is already cancelled.");
+            return false;
         }
-        if (!trip.getVehicleId().isEmpty()){
-            vehicles.stream()
-                    .filter(v -> v.getId().equalsIgnoreCase(trip.getVehicleId()))
-                    .findFirst()
-                    .ifPresent(v -> v.setStatus(VehicleStatus.IDLE));
 
+        if (!trip.getVehicleId().isEmpty()) {
+            vehicles.stream().filter(v -> v.getId().equalsIgnoreCase(trip.getVehicleId()))
+                    .findFirst().ifPresent(v -> v.setStatus(VehicleStatus.IDLE));
         }
-        if (!trip.getDriverId().isEmpty()){
-            drivers.stream()
-                    .filter(d -> d.getId().equalsIgnoreCase(trip.getDriverId()))
-                    .findFirst()
-                    .ifPresent(d -> d.setStatus(DriverStatus.AVAILABLE));
+        if (!trip.getDriverId().isEmpty()) {
+            drivers.stream().filter(d -> d.getId().equalsIgnoreCase(trip.getDriverId()))
+                    .findFirst().ifPresent(d -> d.setStatus(DriverStatus.AVAILABLE));
         }
-        trips.remove(trip);
+
+        trip.setStatus(TripStatus.CANCELLED);
         return true;
     }
-
 }
 
 public class main {
+
+    private static boolean confirmAction(Scanner scanner, String actionMessage) {
+        System.out.print(actionMessage + " (Y/N): ");
+        String response = scanner.nextLine().trim();
+        return response.equalsIgnoreCase("Y") || response.equalsIgnoreCase("YES");
+    }
+
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
         FleetSystem system = new FleetSystem();
@@ -296,7 +356,7 @@ public class main {
             System.out.println("[6] Complete Trip");
             System.out.println("[7] View Fleet & Driver Status");
             System.out.println("[8] View All Trips");
-            System.out.println("[9] Delete Trip");
+            System.out.println("[9] Delete Management");
             System.out.println("[10] Cancel Trip");
             System.out.println("[0] Exit");
             System.out.print("Select an option: ");
@@ -307,90 +367,74 @@ public class main {
                 case "1":
                     System.out.print("Enter Vehicle ID: ");
                     String vId = scanner.nextLine();
-                    if (vId.length() <= 3){
+                    if (vId.length() <= 3) {
                         System.out.println("Invalid Vehicle ID number.");
                         break;
                     }
                     System.out.print("Enter Plate Number: ");
                     String plate = scanner.nextLine();
-
-
-                    if(plate.length() <= 3){
+                    if (plate.length() <= 3) {
                         System.out.println("Invalid Plate Number.");
+                        break;
                     }
                     System.out.print("Enter Passenger Capacity: ");
                     try {
                         int cap = Integer.parseInt(scanner.nextLine());
-                        if(cap >= 20){
+                        if (cap <= 0) {
                             System.out.println("Invalid Passenger Capacity.");
                             break;
                         }
-
                         if (system.addVehicle(vId, plate, cap)) {
                             System.out.println("Vehicle registered successfully.");
                         }
-
                     } catch (NumberFormatException e) {
                         System.out.println("Error: Capacity must be a valid integer.");
-
                     }
                     break;
 
                 case "2":
                     System.out.print("Enter Driver ID: ");
                     String dId = scanner.nextLine();
-
-                    if (dId.length() <= 3){
-                        System.out.println("Invalid Driver License.");
+                    if (dId.length() <= 3) {
+                        System.out.println("Invalid Driver ID.");
                         break;
-
                     }
                     System.out.print("Enter Driver Name: ");
                     String name = scanner.nextLine();
-
-                    if (name.length() <= 3){
+                    if (name.length() <= 3) {
                         System.out.println("Invalid Driver Name.");
                         break;
                     }
-
                     System.out.print("Enter License Number: ");
                     String lic = scanner.nextLine();
-
-                    if (lic.length() <= 3){
+                    if (lic.length() <= 3) {
                         System.out.println("Invalid License Number.");
+                        break;
                     }
-
                     if (system.addDriver(dId, name, lic)) {
                         System.out.println("Driver registered successfully.");
-                        break;
                     }
                     break;
 
                 case "3":
                     System.out.print("Enter Route ID: ");
                     String rId = scanner.nextLine();
-
-                    if (rId.length() <= 3){
+                    if (rId.length() <= 3) {
                         System.out.println("Invalid Route ID.");
                         break;
                     }
-
                     System.out.print("Enter Starting Point: ");
                     String orig = scanner.nextLine();
-
-                    if (orig.length() <= 3){
+                    if (orig.length() <= 3) {
                         System.out.println("Error: Cannot Identify starting point.");
                         break;
                     }
-
                     System.out.print("Enter Destination: ");
                     String dest = scanner.nextLine();
-
-                    if (dest.length() <= 3){
-                        System.out.println("Error: Cannot Identify starting point.");
+                    if (dest.length() <= 3) {
+                        System.out.println("Error: Cannot Identify destination point.");
                         break;
                     }
-
                     if (system.addRoute(rId, orig, dest)) {
                         System.out.println("Route registered successfully.");
                     }
@@ -399,16 +443,13 @@ public class main {
                 case "4":
                     System.out.print("Enter Trip ID: ");
                     String tId = scanner.nextLine();
-
-                    if (tId.length() <= 3){
+                    if (tId.length() <= 3) {
                         System.out.println("Invalid Trip ID.");
                         break;
                     }
-
                     System.out.print("Enter Route ID: ");
                     String routeId = scanner.nextLine();
-
-                    if (routeId.length() <= 3){
+                    if (routeId.length() <= 3) {
                         System.out.println("Invalid Route ID");
                         break;
                     }
@@ -420,12 +461,15 @@ public class main {
                 case "5":
                     System.out.print("Enter Trip ID to Dispatch: ");
                     String dispTrip = scanner.nextLine();
-
                     System.out.print("Enter Vehicle ID to Assign: ");
                     String dispVeh = scanner.nextLine();
-
                     System.out.print("Enter Driver ID to Assign: ");
                     String dispDrv = scanner.nextLine();
+
+                    if (!confirmAction(scanner, "Are you sure you want to dispatch Trip " + dispTrip + "?")) {
+                        System.out.println("Dispatch cancelled.");
+                        break;
+                    }
                     if (system.dispatchTrip(dispTrip, dispVeh, dispDrv)) {
                         System.out.println("Trip dispatched successfully!");
                     }
@@ -434,6 +478,11 @@ public class main {
                 case "6":
                     System.out.print("Enter Trip ID to Complete: ");
                     String compTrip = scanner.nextLine();
+
+                    if (!confirmAction(scanner, "Are you sure you want to mark Trip " + compTrip + " as completed?")) {
+                        System.out.println("Action cancelled.");
+                        break;
+                    }
                     if (system.completeTrip(compTrip)) {
                         System.out.println("Trip marked as COMPLETED.");
                     }
@@ -447,32 +496,77 @@ public class main {
                     system.printTrips();
                     break;
 
-                case "9":
-                    System.out.print("Enter Trip to delete:");
-                    String delTrip = scanner.nextLine().trim();
+                case "9": // DELETE SUB-MENU
+                    System.out.println("\n--- DELETE MENU ---");
+                    System.out.println("[1] Delete Vehicle");
+                    System.out.println("[2] Delete Driver");
+                    System.out.println("[3] Delete Route");
+                    System.out.println("[4] Delete Trip");
+                    System.out.println("[5] Delete Completed Trip");
+                    System.out.print("Select item to delete: ");
+                    String delChoice = scanner.nextLine();
 
-                    if (delTrip.length() <= 3) {
-                        System.out.println("Invalid Trip Id.");
-                        break;
-                    }
+                    switch (delChoice) {
+                        case "1":
+                            System.out.print("Enter Vehicle ID to delete: ");
+                            String delVeh = scanner.nextLine().trim();
+                            if (confirmAction(scanner, "Are you sure you want to delete Vehicle " + delVeh + "?")) {
+                                if (system.deleteVehicle(delVeh)) System.out.println("Vehicle deleted successfully.");
+                            } else System.out.println("Deletion cancelled.");
+                            break;
 
-                    if(system.delete(delTrip)){
-                        System.out.println("Trip Deleted Successfully.");
+                        case "2":
+                            System.out.print("Enter Driver ID to delete: ");
+                            String delDrv = scanner.nextLine().trim();
+                            if (confirmAction(scanner, "Are you sure you want to delete Driver " + delDrv + "?")) {
+                                if (system.deleteDriver(delDrv)) System.out.println("Driver deleted successfully.");
+                            } else System.out.println("Deletion cancelled.");
+                            break;
+
+                        case "3":
+                            System.out.print("Enter Route ID to delete: ");
+                            String delRoute = scanner.nextLine().trim();
+                            if (confirmAction(scanner, "Are you sure you want to delete Route " + delRoute + "?")) {
+                                if (system.deleteRoute(delRoute)) System.out.println("Route deleted successfully.");
+                            } else System.out.println("Deletion cancelled.");
+                            break;
+
+                        case "4":
+                            System.out.print("Enter Trip ID to delete: ");
+                            String delTrip = scanner.nextLine().trim();
+                            if (confirmAction(scanner, "Are you sure you want to delete Trip " + delTrip + "?")) {
+                                if (system.deleteTrip(delTrip)) System.out.println("Trip deleted successfully.");
+                            } else System.out.println("Deletion cancelled.");
+                            break;
+
+                        case "5":
+                            System.out.print("Enter Completed Trip ID to delete: ");
+                            String delComp = scanner.nextLine().trim();
+                            if (confirmAction(scanner, "Are you sure you want to delete Completed Trip " + delComp + "?")) {
+                                if (system.deleteCompletedTrip(delComp)) System.out.println("Completed Trip removed from history.");
+                            } else System.out.println("Deletion cancelled.");
+                            break;
+
+                        default:
+                            System.out.println("Invalid deletion choice.");
                     }
                     break;
-                case "10":
-                    System.out.print("Enter Trip to cancel:");
-                    String cancel = scanner.nextLine().trim();
 
-                    if(cancel.length() <= 3){
-                        System.out.println("Invalid Trip Id.");
+                case "10":
+                    System.out.print("Enter Trip to cancel: ");
+                    String cancel = scanner.nextLine().trim();
+                    if (cancel.length() <= 3) {
+                        System.out.println("Invalid Trip ID.");
                         break;
                     }
-                    if(system.cancel(cancel)){
+                    if (!confirmAction(scanner, "Are you sure you want to cancel Trip " + cancel + "?")) {
+                        System.out.println("Trip cancellation aborted.");
+                        break;
+                    }
+                    if (system.cancel(cancel)) {
                         System.out.println("Trip Cancelled.");
                     }
                     break;
-
 
                 case "0":
                     System.out.println("Exiting system. Goodbye!");
